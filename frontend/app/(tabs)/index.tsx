@@ -13,6 +13,7 @@ import {
   Platform
 } from 'react-native';
 import { addMood, getMoods } from '../../services/moodService';
+import { logout, getToken } from '../../services/authService';
 import { Ionicons } from '@expo/vector-icons';
 import LoginModal from '../../components/LoginModal';
 
@@ -42,26 +43,60 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [isLoginVisible, setIsLoginVisible] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
 
-  const userId = "all";
+  const checkLoginStatus = async () => {
+    const token = await getToken();
+    setIsLoggedIn(!!token);
+    if (token) {
+        fetchMoods();
+    } else {
+        setMoods([]);
+    }
+  };
 
   const fetchMoods = async () => {
     setLoading(true);
     try {
-      const res = await getMoods(userId);
+      const res = await getMoods();
       setMoods(res.data);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error fetching moods:", err);
+      if (err.response?.status === 401) {
+          setIsLoggedIn(false);
+          setMoods([]);
+      }
     } finally {
       setLoading(false);
     }
   };
 
+  const handleLogout = async () => {
+    Alert.alert("Logout", "Are you sure you want to logout?", [
+        { text: "Cancel", style: "cancel" },
+        {
+            text: "Logout",
+            style: "destructive",
+            onPress: async () => {
+                await logout();
+                setIsLoggedIn(false);
+                setMoods([]);
+                Alert.alert("Success", "Logged out successfully");
+            }
+        }
+    ]);
+  };
+
   useEffect(() => {
-    fetchMoods();
+    checkLoginStatus();
   }, []);
 
   const handleAddMood = async () => {
+    if (!isLoggedIn) {
+        setIsLoginVisible(true);
+        return;
+    }
+
     const finalEmoji = customMood ? '✨' : selectedEmoji;
     const finalLabel = customMood || selectedLabel;
 
@@ -73,7 +108,6 @@ export default function Home() {
     setSubmitting(true);
     try {
       const res = await addMood({
-        userId: null,
         emoji: finalEmoji,
         mood: finalLabel,
         note: note,
@@ -85,12 +119,7 @@ export default function Home() {
       Alert.alert("Success", "Mood logged! ✨");
     } catch (err: any) {
       console.error("Full Error:", err);
-      if (err.response) {
-        console.error("Response Data:", err.response.data);
-      } else if (err.request) {
-        console.error("Request Error: No response received. Check your Server/IP.");
-      }
-      Alert.alert("Network Error", "Could not connect to the server. Check your API IP address.");
+      Alert.alert("Error", "Failed to save mood. Please ensure you are logged in.");
     } finally {
       setSubmitting(false);
     }
@@ -124,8 +153,9 @@ export default function Home() {
       <LoginModal
         isVisible={isLoginVisible}
         onClose={() => setIsLoginVisible(false)}
-        onLoginSuccess={(token) => {
-          console.log("Logged in with token:", token);
+        onLoginSuccess={() => {
+          setIsLoggedIn(true);
+          fetchMoods();
         }}
       />
 
@@ -134,9 +164,23 @@ export default function Home() {
           <>
             <View style={styles.headerRow}>
               <Text style={styles.title}>How are you feeling?</Text>
-              <TouchableOpacity onPress={() => setIsLoginVisible(true)} style={styles.loginTrigger}>
-                <Ionicons name="person-circle-outline" size={32} color="#007AFF" />
-              </TouchableOpacity>
+              <View style={styles.headerButtons}>
+                {isLoggedIn && (
+                  <TouchableOpacity onPress={handleLogout} style={styles.iconButton}>
+                    <Ionicons name="log-out-outline" size={28} color="#FF4D4D" />
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity
+                  onPress={() => isLoggedIn ? Alert.alert("Profile", "You are logged in!") : setIsLoginVisible(true)}
+                  style={styles.loginTrigger}
+                >
+                  <Ionicons
+                      name={isLoggedIn ? "person-circle" : "person-circle-outline"}
+                      size={32}
+                      color={isLoggedIn ? "#4CAF50" : "#007AFF"}
+                  />
+                </TouchableOpacity>
+              </View>
             </View>
 
             <View style={styles.selectorContainer}>
@@ -183,16 +227,18 @@ export default function Home() {
                 {submitting ? (
                   <ActivityIndicator color="#fff" />
                 ) : (
-                  <Text style={styles.submitButtonText}>Log Mood</Text>
+                  <Text style={styles.submitButtonText}>{isLoggedIn ? "Log Mood" : "Login to Log Mood"}</Text>
                 )}
               </TouchableOpacity>
             </View>
 
             <View style={styles.historyHeader}>
               <Text style={styles.subtitle}>Recent History</Text>
-              <TouchableOpacity onPress={fetchMoods}>
-                 <Ionicons name="refresh" size={20} color="#666" />
-              </TouchableOpacity>
+              {isLoggedIn && (
+                <TouchableOpacity onPress={fetchMoods}>
+                    <Ionicons name="refresh" size={20} color="#666" />
+                </TouchableOpacity>
+              )}
             </View>
           </>
         }
@@ -201,7 +247,11 @@ export default function Home() {
         renderItem={renderMoodItem}
         contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 60, paddingBottom: 40 }}
         ListEmptyComponent={
-          !loading ? <Text style={styles.emptyText}>No moods logged yet.</Text> : null
+          !loading ? (
+              <Text style={styles.emptyText}>
+                  {isLoggedIn ? "No moods logged yet." : "Please login to see your history."}
+              </Text>
+          ) : null
         }
         ListFooterComponent={
             loading ? <ActivityIndicator size="large" color="#007AFF" style={{ marginTop: 20 }} /> : null
@@ -226,6 +276,15 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
     color: '#1a1a1a',
+    flex: 1,
+  },
+  headerButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  iconButton: {
+    marginRight: 10,
+    padding: 5,
   },
   loginTrigger: {
     padding: 5,

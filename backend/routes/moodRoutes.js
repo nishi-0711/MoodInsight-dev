@@ -1,12 +1,14 @@
 import express from "express";
 import Mood from "../models/Mood.js";
+import auth from "../middleware/auth.js";
 
 const router = express.Router();
 
-// ➕ Add Mood Entry
-router.post("/add", async (req, res) => {
+// ➕ Add Mood Entry (Protected)
+router.post("/add", auth, async (req, res) => {
   try {
-    const { userId, emoji, mood, note } = req.body;
+    const { emoji, mood, note } = req.body;
+    const userId = req.user.id; // From auth middleware
 
     const newMood = new Mood({ userId, emoji, mood, note });
     await newMood.save();
@@ -18,28 +20,41 @@ router.post("/add", async (req, res) => {
   }
 });
 
-// 📥 Get All Moods (or for a user)
-router.get("/:userId", async (req, res) => {
+// 📥 Get Private Moods for Logged In User
+router.get("/me", auth, async (req, res) => {
   try {
-    const { userId } = req.params;
-
-    let query = {};
-    if (userId !== "all") {
-        query.userId = userId;
-    }
-
-    const moods = await Mood.find(query).sort({ createdAt: -1 });
-
+    const userId = req.user.id;
+    const moods = await Mood.find({ userId }).sort({ createdAt: -1 });
     res.json(moods);
   } catch (error) {
     res.status(500).json({ message: "Error fetching moods" });
   }
 });
 
-// 🗑️ Delete Mood
-router.delete("/:id", async (req, res) => {
+// 📥 Get All Moods (Legacy/Public - optional)
+router.get("/user/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const query = userId === "all" ? {} : { userId };
+    const moods = await Mood.find(query).sort({ createdAt: -1 });
+    res.json(moods);
+  } catch (error) {
+    res.status(500).json({ message: "Error fetching moods" });
+  }
+});
+
+// 🗑️ Delete Mood (Protected)
+router.delete("/:id", auth, async (req, res) => {
     try {
-        await Mood.findByIdAndDelete(req.params.id);
+        const mood = await Mood.findById(req.params.id);
+        if (!mood) return res.status(404).json({ message: "Mood not found" });
+
+        // Ensure user owns the mood
+        if (mood.userId.toString() !== req.user.id) {
+            return res.status(401).json({ message: "Not authorized" });
+        }
+
+        await mood.deleteOne();
         res.json({ message: "Mood deleted" });
     } catch (error) {
         res.status(500).json({ message: "Error deleting mood" });
